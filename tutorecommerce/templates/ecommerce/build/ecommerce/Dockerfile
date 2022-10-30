@@ -1,7 +1,16 @@
 FROM docker.io/ubuntu:20.04
 
+{% if APT_PROXY -%}
+RUN echo 'Acquire::{{ APT_PROXY | url_part('scheme') }}::Proxy "{{ APT_PROXY }}";' \
+    > /etc/apt/apt.conf.d/00proxy 
+{%- endif %}
+
 RUN apt update && \
   apt install -y curl git-core language-pack-en libmysqlclient-dev libssl-dev python3 python3-pip python3-venv
+
+{% if APT_PROXY -%}
+RUN rm /etc/apt/apt.conf.d/00proxy
+{%- endif %}
 
 ARG APP_USER_ID=1000
 RUN useradd --home-dir /openedx --create-home --shell /bin/bash --uid ${APP_USER_ID} app
@@ -10,6 +19,9 @@ USER ${APP_USER_ID}
 # Create python venv
 RUN python3 -m venv /openedx/venv/
 ENV PATH "/openedx/venv/bin:$PATH"
+
+ENV PIP_INDEX_URL={{ PIP_INDEX_URL }} \
+    PIP_TRUSTED_HOST={{ PIP_INDEX_URL | url_part('netloc') }}
 RUN pip install setuptools==62.1.0 pip==22.0.4 wheel==0.37.1
 
 # Install a recent version of nodejs
@@ -29,7 +41,7 @@ RUN git config --global user.email "tutor@overhang.io" \
   && git config --global user.name "Tutor"
 
 # nodejs requirements (aka: "make requirements.js")
-ARG NPM_REGISTRY=https://registry.npmjs.org/
+ARG NPM_REGISTRY={{ NPM_REGISTRY }}
 RUN npm install --verbose --registry=$NPM_REGISTRY
 RUN ./node_modules/.bin/bower install --allow-root
 
@@ -53,6 +65,10 @@ RUN python3 manage.py update_assets --skip-collect
 RUN ./node_modules/.bin/r.js -o build.js
 RUN python3 manage.py collectstatic --noinput
 RUN python3 manage.py compress --force
+
+# unset unneeded environment variables
+ENV PIP_INDEX_URL= \
+    PIP_TRUSTED_HOST= 
 
 # Setup minimal yml config file, which is required by production settings
 RUN echo "{}" > /openedx/config.yml
